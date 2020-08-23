@@ -1,6 +1,11 @@
 import numpy as np
 import pandas as pd
-#from scipy.stats import *
+from scipy.stats import trim_mean, mode
+from scipy.stats import skew, skewtest, kurtosis, kurtosistest
+from statistics import mean, median
+
+
+DEFAULT_SIG_LEVEL = 0.05
 
 
 def get_unique_values(column):
@@ -22,6 +27,58 @@ def categorical_column_recognition(column):
     condition1 = 2 < unique_values_count(column) <= 30
     condition2 = isinstance(get_unique_values(column)[0], (np.str, np.integer))
     return condition1 and condition2
+
+
+def get_mean(column):
+    """Sample mean"""
+    return mean(column)
+
+
+def get_X_perc_trimmed_mean(column, trimmed_ratio):
+    """As robust as median, trimmed mean does not completely disregard outliers
+    Applicable for both normal and non-normal distributions"""
+    return trim_mean(column, trimmed_ratio)
+
+
+def get_median(column):
+    return median(column)
+
+
+def get_mode(column):
+    return mode(column)
+
+
+def get_min(column):
+    return min(column)
+
+
+def get_max(column):
+    return max(column)
+
+
+def get_range(column):
+    return '({0:.2f} ~ {1:.2f})'.format(get_min(column), get_max(column))
+
+
+def get_kurtosis(column):
+    """Kirtosis measures weight of tail of data comparing to normal distribution
+    higher the value, heavier the tails -> more outliers; vice versa. (Exception: uniform distribution)"""
+    return kurtosis(column)
+
+
+def get_kurtosis_p_values(column):
+    """Valid only for sample size > 20, only p-value is printed
+    null hypothesis tail weights like normal, small p-value rejects it indicates likelihood of heavy tail"""
+    return kurtosistest(column)
+
+
+def get_skewness(column):
+    """Skewness measures lack of symmetry."""
+    return skew(column)
+
+
+def get_skewness_p_values(column):
+    return skewtest(column)
 
 
 def continuous_variable_recognition(column):
@@ -111,3 +168,102 @@ class raw_data:
             return list(missing_value_columns.values)
         else:
             print('Congratulations! There is no columns with obvious missing values.')
+
+    def get_mean_traditional(self):
+        traditional_mean = \
+            self.raw_data.select_dtypes(exclude=[object, bool]).apply(get_mean, axis=0)
+        if len(traditional_mean) > 0:
+            return traditional_mean
+        else:
+            print('No mean values calculated, check your data ingestion.')
+
+    def get_mean_trimmed(self, r=0.05):
+        trimmed_mean = \
+            self.raw_data.select_dtypes(exclude=[object, bool]).apply(lambda x: get_X_perc_trimmed_mean(x, r), axis=0)
+        if len(trimmed_mean) > 0:
+            return trimmed_mean
+        else:
+            print('No mean values calculated, check your data ingestion.')
+
+    def get_median(self):
+        medians = \
+            self.raw_data.select_dtypes(exclude=[object, bool]).apply(get_median, axis=0)
+        if len(medians) > 0:
+            return medians
+        else:
+            print('No median values calculated, check your data ingestion.')
+
+    def get_mode(self):
+        modes = \
+            self.raw_data.select_dtypes(exclude=[object, bool]).apply(get_mode, axis=0)
+        if len(modes) > 0:
+            return modes
+        else:
+            print('No mode values calculated, check your data ingestion.')
+
+    def get_minimums(self):
+        minimums = \
+            self.raw_data.select_dtypes(exclude=[object, bool]).apply(get_min, axis=0)
+        if len(minimums) > 0:
+            return minimums
+        else:
+            print('No minimum values calculated, check your data ingestion.')
+
+    def get_maximums(self):
+        maximums = \
+            self.raw_data.select_dtypes(exclude=[object, bool]).apply(get_max, axis=0)
+        if len(maximums) > 0:
+            return maximums
+        else:
+            print('No maximum values calculated, check your data ingestion.')
+
+    def get_range(self):
+        ranges = self.raw_data.select_dtypes(exclude=[object, bool]).apply(get_range, axis=0)
+        if len(ranges) > 0:
+            return ranges
+        else:
+            print('Something is wrong, check your data ingestion.')
+
+    def get_kurtosis_report(self, sig_level=DEFAULT_SIG_LEVEL):
+        kurtosis_vals = self.raw_data.select_dtypes(exclude=[object, bool]).apply(get_kurtosis, axis=0)
+        test_p_vals = self.raw_data.select_dtypes(exclude=[object, bool]).\
+            apply(lambda x: get_kurtosis_p_values(x)[1], axis=0)
+        stat_significant = test_p_vals < sig_level
+        column_names = {0: 'excess_kurtosis_values', 1: 'weight_of_tail_p_values', 2: 'is_statistically_significant'}
+        if len(kurtosis_vals) > 0:
+            return pd.concat([kurtosis_vals, test_p_vals, stat_significant], axis=1).rename(columns=column_names)
+        else:
+            print('Something is wrong, check your data ingestion.')
+
+    def get_skewness_report(self, sig_level=DEFAULT_SIG_LEVEL):
+        skewness_vals = self.raw_data.select_dtypes(exclude=[object, bool]).apply(get_skewness, axis=0)
+        test_p_vals = self.raw_data.select_dtypes(exclude=[object, bool]).\
+            apply(lambda x: get_skewness_p_values(x)[1], axis=0)
+        stat_significant = test_p_vals < sig_level
+        column_names = {0: 'skewness_values', 1: 'skewness_p_values', 2: 'is_statistically_significant'}
+        if len(skewness_vals) > 0:
+            return pd.concat([skewness_vals, test_p_vals, stat_significant], axis=1).rename(columns=column_names)
+        else:
+            print('Something is wrong, check your data ingestion.')
+
+    def get_normality_report(self, sig_level=DEFAULT_SIG_LEVEL):
+        only_continuous_variables = self.get_numeric_column_list()
+        skewness_vals = \
+            self.raw_data[only_continuous_variables].select_dtypes(exclude=[object, bool]).apply(get_skewness, axis=0)
+        skewness_test_results = \
+            self.raw_data[only_continuous_variables].select_dtypes(exclude=[object, bool]).\
+            apply(lambda x: get_skewness_p_values(x)[1] < sig_level, axis=0)
+        kurtosis_vals = \
+            self.raw_data[only_continuous_variables].select_dtypes(exclude=[object, bool]).apply(get_kurtosis, axis=0)
+        kurtosis_test_results = \
+            self.raw_data[only_continuous_variables].select_dtypes(exclude=[object, bool]). \
+            apply(lambda x: get_kurtosis_p_values(x)[1] < sig_level, axis=0)
+        column_names = {0: 'skewness_values', 1: 'skew_is_significant',
+                        2: 'excess_kurtosis', 3: 'tail_weight_is_significant'}
+        if len(skewness_vals) > 0:
+            return pd.concat([skewness_vals, skewness_test_results, kurtosis_vals, kurtosis_test_results],
+                             axis=1).rename(columns=column_names)
+        else:
+            print('Something is wrong, check your data ingestion.')
+
+
